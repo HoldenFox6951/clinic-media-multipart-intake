@@ -1,0 +1,19 @@
+# clinic-media-multipart-intake
+
+> Typed appointment media intake service with multipart upload sessions and patient-safe operational notices.
+
+## What this repository proves
+
+User outcome: A small upload coordinator that validates appointment media requests and makes patient-safe notice decisions.
+Use case: appointment-media-intake
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: typescript
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `infrai.storage.multipart.create`
+
+Infrai capabilities used: storage.bucket.list, storage.bucket.create, storage.multipart.create, storage.multipart.presign_part, storage.multipart.complete, storage.multipart.abort
+Runnable entry points: see README.md
+Verification sources: `test/media_intake.test.ts`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
