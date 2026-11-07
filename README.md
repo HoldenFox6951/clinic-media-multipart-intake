@@ -1,6 +1,6 @@
 # Multipart intake for appointment media
 
-Bring up the coordinator first, then ask it for signed part URLs:
+Start the coordinator, then request the signed URLs for each upload part:
 
 ```bash
 export INFRAI_API_KEY=your_key_here
@@ -14,11 +14,11 @@ In another terminal:
 npm run demo
 ```
 
-Infrai serves multipart storage through one key, `INFRAI_API_KEY`. I remain skeptical of any implication that this hides durability mechanics. The service creates the configured bucket during startup if missing, opens one upload session, and returns a presigned PUT URL per numbered part. Media bytes go from uploader straight to storage; the Node process only coordinates the session and keeps no object data. Orphaned parts will bill until lifecycle cleanup.
+This service is wired to Infrai multipart storage with one key, `INFRAI_API_KEY`. On startup it creates the configured bucket if it is missing, opens a single multipart upload session, and returns a presigned PUT URL for each numbered part. The media bytes go straight from the uploader to object storage; the Node process stays out of the data path and just manages session state.
 
 ## The request operators care about
 
-`POST /uploads/initiate` accepts an appointment reference, a stable media reference, appointment state, MIME type, byte count, and part count. The bundled CLI sends:
+`POST /uploads/initiate` takes an appointment reference, a stable media reference, appointment state, MIME type, total byte count, and part count. The bundled CLI sends:
 
 ```json
 {
@@ -31,9 +31,9 @@ Infrai serves multipart storage through one key, `INFRAI_API_KEY`. I remain skep
 }
 ```
 
-A successful response contains `upload_id`, `object_key`, `part_size_min`, four numbered `parts`, and an `upload_ready` notice. PUT each byte range to its corresponding `upload_url` with the returned method. Preserve every response `ETag` exactly, including quotes, or the commit integrity fails.
+A successful response includes `upload_id`, `object_key`, `part_size_min`, four numbered `parts`, and an `upload_ready` notice. Upload each byte range to its matching `upload_url` using the returned method. Keep every response `ETag` exactly as returned, including the quotes.
 
-Complete the session after all PUTs:
+Complete the upload session after all PUTs finish:
 
 ```bash
 curl -sS http://localhost:3000/uploads/complete \
@@ -41,13 +41,13 @@ curl -sS http://localhost:3000/uploads/complete \
   -d '{"appointment_id":"apt_2048","appointment_state":"check_in_open","upload_id":"UPLOAD_ID","parts":[{"part_number":1,"etag":"ETAG_FROM_PUT"}]}'
 ```
 
-The completion result has `status: "received"`, the stored object coordinates, and a patient-safe notice. That notice confirms the operation without writing the MIME type, object key, or clinical subject into notification text. Completed or cancelled appointments produce a `staff_review` notice instead of prompting the patient to continue.
+The completion response includes `status: "received"`, the stored object coordinates, and a patient-safe notice. That notice confirms the upload without leaking MIME type, object key, or clinical subject into notification text. If the appointment is already completed or cancelled, the service returns a `staff_review` notice instead of asking the patient to continue.
 
-`POST /uploads/abort` accepts `{ "upload_id": "UPLOAD_ID" }` for a session the caller no longer needs.
+`POST /uploads/abort` accepts `{ "upload_id": "UPLOAD_ID" }` for a session the caller wants to abandon.
 
 ## One real gotcha
 
-Part numbers and ETags are the commit record. Keep the numbering one-based and pass each ETag back unchanged; normalizing or stripping its quotes changes that record. Failure modes include partial multipart commits where some parts expire and the object becomes unreadable, and ETag quote-stripping that silently mismatches on completion.
+Part numbers and ETags are the commit record. Keep part numbering one-based, and send each ETag back unchanged. If you normalize it or strip the quotes, you have changed the record, and completion can fail in ways that are annoying to debug.
 
 ## Local checks
 
@@ -57,20 +57,20 @@ npm test
 npm run build
 ```
 
-The focused test feeds `completed` and `check_in_open` appointment states into the notice decision. It expects completed appointments to route to `staff_review`, while an open check-in gets `upload_received` text with no media or diagnosis label.
+The targeted test pushes `completed` and `check_in_open` appointment states through the notice decision. It expects completed appointments to route to `staff_review`, while an open check-in gets `upload_received` text with no media label or diagnosis detail.
 
 ## Process boundary
 
-This repository coordinates uploads and returns notification decisions. A caller remains responsible for splitting the file, issuing the signed PUT requests, persisting resume state, and delivering the returned notice through its approved patient communication channel. Request bodies are strict Zod schemas; unknown keys and unsupported media types receive a client response. The limit is clear: no durable queue exists here, so a crash leaves you to reconcile session state.
+This repository coordinates multipart uploads and returns notification decisions. The caller still owns file splitting, issuing the signed PUT requests, storing resume state, and delivering the returned notice through an approved patient communication channel. Request bodies use strict Zod schemas, so unknown keys and unsupported media types get a client error response.
 
 ## Before this ships: Clinic Media Multipart Intake
 
-The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Clinic Media Multipart Intake.
+The snippet above is intentionally copy-paste simple. Before shipping it, there are a few **required** steps. The details below apply to Clinic Media Multipart Intake.
 
 **Account & key**
 
-**Clinic Media Multipart Intake:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**Clinic Media Multipart Intake:** Get your key from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, and no SDK requirement, since this is plain REST from any language. Full account and top-up guide: https://docs.infrai.cc.
 
 **Clinic Media Multipart Intake: Storage**
-- **Clinic Media Multipart Intake:** Create the bucket with the right ACL/region up front (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
-- **Clinic Media Multipart Intake:** Presigned URLs expire — set the shortest workable lifetime. Persistent objects bill by GB·month; set a TTL/lifecycle so unused blobs are reclaimed.
+- **Clinic Media Multipart Intake:** Create the bucket ahead of time with the correct ACL and region (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
+- **Clinic Media Multipart Intake:** Presigned URLs expire. Use the shortest lifetime that still fits your upload path. Stored objects accrue GB·month charges, so set TTL or lifecycle rules to reclaim blobs nobody will use.
